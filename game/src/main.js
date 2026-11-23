@@ -1,10 +1,10 @@
-// Sunstone Gambit entrypoint: canvas bootstrap, fixed-timestep loop, input binding, and shot staging.
+// Sunstone Gambit entrypoint: modular game loop, responsive HiDPI canvas, input controller, and shot staging.
 
 import { RULES, VIEW } from './config.js';
-import { createSoundEngine } from './audio.js';
-import { createAnimationEngine } from './animations.js';
-import { createDuelEngine } from './rules.js';
-import { createTableRenderer } from './renderer.js';
+import { DuelEngine } from './rules.js';
+import { AnimationEngine } from './animations.js';
+import { SoundEngine } from './audio.js';
+import { TableRenderer } from './renderer.js';
 import { attachInputController } from './input.js';
 import { stageScreenshotScene } from './shots.js';
 
@@ -12,10 +12,10 @@ const canvas = document.getElementById('table-canvas');
 const statusEl = document.getElementById('sr-status');
 const ctx = canvas.getContext('2d');
 
-const audio = createSoundEngine();
-const anim = createAnimationEngine();
-const engine = createDuelEngine(anim, audio);
-const renderer = createTableRenderer();
+const audio = new SoundEngine();
+const anim = new AnimationEngine();
+const engine = new DuelEngine(anim, audio);
+const renderer = new TableRenderer();
 
 function announce(text) {
   if (statusEl) statusEl.textContent = text;
@@ -27,14 +27,7 @@ function resizeCanvas() {
   const h = Math.max(1, Math.floor(window.innerHeight));
   canvas.width = Math.floor(w * dpr);
   canvas.height = Math.floor(h * dpr);
-  ctx.setTransform(
-    (canvas.width / VIEW.width),
-    0,
-    0,
-    (canvas.height / VIEW.height),
-    0,
-    0,
-  );
+  ctx.setTransform(canvas.width / VIEW.width, 0, 0, canvas.height / VIEW.height, 0, 0);
 }
 
 window.addEventListener('resize', resizeCanvas);
@@ -52,32 +45,30 @@ if (shotParam) {
   renderer.render(ctx, engine.state, anim, audio);
 } else {
   engine.openTitle(activeSeed);
-  let lastTimestamp = performance.now();
-  let accumulator = 0;
+  let lastTs = performance.now();
+  let acc = 0;
 
   function frame(now) {
-    const elapsed = Math.min(0.1, Math.max(0, (now - lastTimestamp) / 1000));
-    lastTimestamp = now;
-    accumulator += elapsed;
-
-    while (accumulator >= RULES.stepSeconds) {
+    acc += Math.min(0.1, Math.max(0, (now - lastTs) / 1000));
+    lastTs = now;
+    while (acc >= RULES.stepSeconds) {
       engine.step(RULES.stepSeconds);
-      accumulator -= RULES.stepSeconds;
+      acc -= RULES.stepSeconds;
     }
-
     renderer.render(ctx, engine.state, anim, audio);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 }
 
-// Read-only state snapshot for deterministic verification & automated playtests.
 window.__SUNSTONE__ = {
   getState: () => ({
     screen: engine.state.screen,
     turn: engine.state.turn,
     phase: engine.state.phase,
     score: engine.state.score,
+    relic: engine.state.relic.id,
+    rival: engine.state.rival.id,
     playerHp: engine.state.player.hp,
     playerWard: engine.state.player.ward,
     playerEnergy: engine.state.player.energy,
@@ -89,6 +80,8 @@ window.__SUNSTONE__ = {
     opponentIntentCount: engine.state.opponent.intents.length,
     combosTriggered: engine.state.combosTriggered,
     countersLanded: engine.state.countersLanded,
+    bestComboLabel: engine.state.bestComboLabel,
+    totalDamageDealt: engine.state.totalDamageDealt,
     muted: audio.isMuted(),
   }),
 };
